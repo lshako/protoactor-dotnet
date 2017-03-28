@@ -7,9 +7,11 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection;
 using System.Runtime;
 using System.Threading;
 using System.Threading.Tasks;
+using BenchmarkDotNet.Running;
 using Proto;
 using Proto.Mailbox;
 
@@ -17,63 +19,7 @@ class Program
 {
     static void Main(string[] args)
     {
-        Console.WriteLine($"Is Server GC {GCSettings.IsServerGC}");
-        const int messageCount = 1000000;
-        const int batchSize = 100;
-
-        Console.WriteLine("Dispatcher\t\tElapsed\t\tMsg/sec");
-        var tps = new[] {300, 400, 500, 600, 700, 800, 900};
-        foreach (var t in tps)
-        {
-            var d = new ThreadPoolDispatcher {Throughput = t};
-
-            var clientCount = Environment.ProcessorCount * 2;
-            var clients = new PID[clientCount];
-            var echos = new PID[clientCount];
-            var completions = new TaskCompletionSource<bool>[clientCount];
-
-
-            var echoProps = Actor.FromFunc(ctx =>
-            {
-                switch (ctx.Message)
-                {
-                    case Msg msg:
-                        msg.Sender.Tell(msg);
-                        break;
-                }
-                return Actor.Done;
-            }).WithDispatcher(d);
-
-            for (var i = 0; i < clientCount; i++)
-            {
-                var tsc = new TaskCompletionSource<bool>();
-                completions[i] = tsc;
-                var clientProps = Actor.FromProducer(() => new PingActor(tsc, messageCount, batchSize))
-                    .WithDispatcher(d);
-
-                clients[i] = Actor.Spawn(clientProps);
-                echos[i] = Actor.Spawn(echoProps);
-            }
-            var tasks = completions.Select(tsc => tsc.Task).ToArray();
-            var sw = Stopwatch.StartNew();
-            for (var i = 0; i < clientCount; i++)
-            {
-                var client = clients[i];
-                var echo = echos[i];
-
-                client.Tell(new Start(echo));
-            }
-            Task.WaitAll(tasks);
-
-            sw.Stop();
-            var totalMessages = messageCount * 2 * clientCount;
-
-            var x = (int) (totalMessages / (double) sw.ElapsedMilliseconds * 1000.0d);
-            Console.WriteLine($"{t}\t\t\t{sw.ElapsedMilliseconds}\t\t{x}");
-            Thread.Sleep(2000);
-        }
-
-        Console.ReadLine();
+        BenchmarkSwitcher.FromAssembly(typeof(Program).GetTypeInfo().Assembly).RunAll();
     }
 
     public class Msg
